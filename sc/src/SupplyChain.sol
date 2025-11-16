@@ -4,16 +4,41 @@
 
 pragma solidity ^0.8.13;
 
-contract SupplyChain {
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
+/**
+ * @title SupplyChain
+ * @notice Solucion de SupplyChain.Este contrato inteligente simula una plataforma de SupplyChain básica en la blockchain.
+ * @dev IMPORTANTE: Este contrato no maneja transferencias de fondos (criptomonedas), solo registra datos.
+ *      Está diseñado con fines educativos y del proyecto PFM para mostrar cómo se pueden anidar mappings y estructurar
+ *      datos complejos en Solidity, una práctica común para simular bases de datos en la blockchain.
+ */
+
+
+contract SupplyChain  is ReentrancyGuard {
+
+     /* ======================= ERRORES PERSONALIZADOS ======================= */
+    /**
+    * @notice Lanza si el usuario no tiene aprobación suficiente.
+    */
     error NoApproved(); // Se emite cuando una dirección no autorizada intenta ejecutar una función protegida.
-    error EntradaInvalida(string campo); // Para entradas de datos no válidas, como un nombre.
+    
+    /**
+    * @notice Lanza si el nombre proporcionado es inválido o vacío.
+    */
+    error InvalidName(); // Para entradas de datos no válidas, como un nombre.
+
+    /**
+    * @notice Acción no realizada por el owner.
+    */
+    error NoOwner(); // Se emite cuando una dirección no autorizada intenta ejecutar una función protegida que solo el owner o administrador del contrato puede ejecutar. 
+
     /**
     * @notice Acción no autorizada por el rol actual.
     */
-    error NoAutorizado(); // Se emite cuando una dirección no autorizada intenta ejecutar una función protegida.
+    error Unauthorized(); // Se emite cuando una dirección no autorizada intenta ejecutar una función protegida.
 
-
+    /* ======================= ENUMS ======================= */
     /**
     * @notice Enum para estados de usuario: pendiente, aprobado, rechazado o cancelado.
     */
@@ -52,17 +77,36 @@ contract SupplyChain {
         FinishedProduct    //Valor 1
     }
 
+    /**
+    * @notice Representa los datos principales de un usuario en la plataforma.
+    * @dev La relación entre usuario y dirección se gestiona vía mappings addressToUserId y users.
+    */
+    struct User {
+        uint256 id;
+        address userAddress;
+        UserRole role;
+        UserStatus status;
+    }
+
+    /**
+    * @notice Estructura para registrar activos de la cadena de suministro.
+    * @dev Incluye campo de balances por dirección.
+    */
     struct Token {
         uint256 id;        // Token ID
         address creator;   // Dirección del creador del token
         string name;       // Nombre del token
+        TokenType tokenType; // Tipo de token 
         uint256 totalSupply; // Suministro o cantidad total del token
         string features;   // Características del token (JSON string)
-        uint256 parentId;  // ID del token padre (si es un token hijo)
+        uint256 parentId;  // ID del token padre (si es un token hijo) , 0 si es un token de materia prima y !=0 si es producto terminado
         uint256 dateCreated;    // Fecha de creación del token
         mapping(address => uint256) balance;    // Mapeo de balances por dirección
     }
 
+    /**
+    * @notice Modelo para transferencias dentro de la plataforma.
+    */
     struct Transfer {
         uint256 id;       // ID de la transferencia
         address from;     // Dirección del remitente
@@ -73,53 +117,95 @@ contract SupplyChain {
         TransferStatus status;
     }
 
-    struct User {
-        uint256 id;
-        address userAddress;
-        string role;
-        UserStatus status;
-    }
-
-    address public admin;   // Dirección del administrador del contrato
+    address public owner;   // Dirección del administrador/dueño del contrato
     
     // Contadores para los ids de los tokens, transfers y users
     uint256 public nextTokenId = 1;     // ID del próximo token
     uint256 public nextTransferId = 1;   // ID de la próxima transferencia
     uint256 public nextUserId = 1;       // ID del próximo usuario
     
-    // mapping para los tokens, transfers y users
-    mapping(uint256 => Token) public tokens;             // Mapeo de tokens por ID
-    mapping(uint256 => Transfer) public transfers;       // Mapeo de transfers por ID
+    // mapping para usuarios, los tokens y las transferencias
+
+    /**
+     * @notice Almacena todas los usuarios registrados por su id.
+     * @dev `mapping(uint256 => User)`: Asocia una el id del usuario (clave)
+     *      con la estructura de datos `User` (el valor). Es `private` para controlar el acceso.
+     */
+
     mapping(uint256 => User) public users;               // Mapeo de users por ID
+      /**
+     * @notice Almacena todas los id de usuario registrados por su direcciones de las billeteras.
+     * @dev `mapping(address => uint256)`: Asocia una dirección de billetera (la clave) del User
+     *      con el id asignado al `User` (el valor). Es `private` para controlar el acceso.
+     */
+
     mapping(address => uint256) public addressToUserId;  // Mapeo de direcciones a IDs de usuario
 
-    // eventos para los tokens, transfers y users
-    event TokenCreated(uint256 indexed tokenId, address indexed creator, string name, uint256 totalSupply); // Evento de creación de token
+    mapping(uint256 => Token) public tokens;             // Mapeo de tokens por ID
+
+    mapping(uint256 => Transfer) public transfers;       // Mapeo de transfers por ID
+
+    /* ======================= EVENTOS ======================= */
+
+    /**
+    * @notice Evento de asignación inicial de ownership.
+    */
+    event AssignInitialContractOwner(address indexed initialContractOwner);
+
+    // eventos para los users, token y transfers
+
+    /**
+    * @notice Evento al solicitar un nuevo rol de usuario.
+    */
+    event UserRoleRequested(address indexed user, UserRole role); // Evento de solicitud de rol de usuario
+
+    /**
+    * @notice Evento por cambio de estado de usuario.
+    */
+    event UserStatusChanged(address indexed user, UserStatus oldStatus, UserStatus newStatus);
+
+   /**
+    * @notice Evento cuando se crea un nuevo token.
+    */
+    event TokenCreated(uint256 indexed tokenId, address indexed creator, string name, TokenType tokenType, uint256 totalSupply, uint256 parentId);
+
+    /**
+    * @notice Evento que representa una solicitud de transferencia.
+    */
     event TransferRequested(uint256 indexed transferId, address indexed from, address indexed to, uint256 tokenId, uint256 amount); // Evento de solicitud de transferencia
+
+ 
+    /**
+    * @notice Evento ante la aceptación de una transferencia.
+    */
     event TransferAccepted(uint256 indexed transferId); // Evento de aceptación de transferencia
+    /**
+    * @notice Evento cuando una transferencia ha sido rechazada.
+    */
     event TransferRejected(uint256 indexed transferId); // Evento de rechazo de transferencia
-    event UserRoleRequested(address indexed user, string role); // Evento de solicitud de rol de usuario
-    event UserStatusChanged(address indexed user, UserStatus status); // Evento de cambio de estado de usuario
 
     constructor() {
-        admin = msg.sender; // Establece el administrador del contrato como el creador del contrato
+        owner = msg.sender; // Establece el administrador del contrato como el creador del contrato
+        emit AssignInitialContractOwner(owner);
     }   
     
-    // --- Modificadores (Modifiers) ---
+    /* ======================= MODIFICADORES ======================= */
+
     // Los modificadores son código reutilizable que se puede añadir a las funciones para
     // verificar condiciones (permisos, estados, etc.) antes de que se ejecuten.
 
     /**
-     * @dev Verifica que quien llama a la función (`msg.sender`) es el dueño o administrador del contrato.
-     *      o el propietario del contrato. Si no, revierte la transacción.
-     */
-    modifier onlyAdmin() {
-        if (admin != msg.sender) {
-            revert NoAutorizado();
-        }
+    * @dev Solo permite acceso al administrator/dueño actual del contrato.
+    * @dev Verifica que quien llama a la función (`msg.sender`) es el dueño o administrador del contrato.
+    *      Si no, revierte la transacción.
+    */
+    modifier onlyOwner() {
+        //require(owner == msg.sender, "No es el administrador o dueno del contrato");
+        if (owner != msg.sender) revert NoOwner();
         _; // Este símbolo especial indica que se debe ejecutar el cuerpo de la función que usa el modificador.
     }
 
+    /* ======================= FUNCIONES PRINCIPALES:  ======================= */
 
     // Gestión de Usuarios
     function requestUserRole(string memory role) public { 
@@ -158,4 +244,11 @@ contract SupplyChain {
     function getUserTransfers(address userAddress) public view returns (uint[] memory) {
     }
 
+    receive() external payable {
+    revert("Este contrato no acepta ETH");
+    }
+
+    fallback() external payable {
+    revert("Funcion no soportada");
+    }
 }
