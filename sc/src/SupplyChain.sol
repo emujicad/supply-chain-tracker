@@ -689,10 +689,91 @@ contract SupplyChain  is ReentrancyGuard {
 
     // Gestión de Transferencias
 
-    function transfer(address to, uint tokenId, uint amount) public { 
+    /**
+    * @notice Solicita una transferencia de una cantidad específica de un token a otro usuario.
+    * @param to Dirección destinataria de la transferencia.
+    * @param tokenId ID del token a transferir.
+    * @param amount Cantidad de tokens a transferir.
+    * @dev Solo usuarios con balance suficiente pueden hacer la transferencia, y solo usuarios aprobados y con rol adecuado.
+    * @dev Se crea una transferencia en estado Pending, su aceptación o rechazo se debe manejar con funciones específicas.
+    */
+    function transfer(address to, uint tokenId, uint amount) external whenNotPaused onlyTransfersAllowed nonReentrant{
+
+        //require(to != address(0), "Direccion destino invalida");
+        //require(amount > 0, "Cantidad debe ser mayor que cero");
+        if (to == address(0)) revert InvalidAddress();
+        if (amount == 0) revert InvalidAmount();
+        
+        Token storage token = tokens[tokenId];
+        if (token.id == 0) revert TokenDoesNotExist();
+
+        uint256 senderBalance = token.balance[msg.sender];
+        //require(senderBalance >= amount, "Saldo insuficiente para transferencia");
+        if (senderBalance < amount) revert InsufficientBalance(senderBalance, amount);
+
+        // Disminuir balance del remitente inmediatamente para evitar doble gasto
+        token.balance[msg.sender] = senderBalance - amount;
+
+        // Crear nueva transferencia tipo pending
+        Transfer storage transferItem = transfers[nextTransferId];
+        transferItem.id = nextTransferId;
+        transferItem.from = msg.sender;
+        transferItem.to = to;
+        transferItem.tokenId = tokenId;
+        transferItem.amount = amount;
+        transferItem.dateCreated = block.timestamp;
+        transferItem.status = TransferStatus.Pending;
+
+        emit TransferRequested(nextTransferId, msg.sender, to, tokenId, amount);
+
+        unchecked {
+            nextTransferId++;
+        }
     }
-    function acceptTransfer(uint transferId) public {
+
+    /**
+    * @notice Acepta una transferencia pendiente, completando el movimiento de tokens entre usuarios.
+    * @param transferId ID de la transferencia a aceptar.
+    * @dev Solo puede ser llamada por el destinatario de la transferencia..
+    *      Actualiza balances y estado de transferencia.
+    *      Emite el evento TransferAccepted.
+    *      Requiere que el contrato no esté pausado.
+    */
+    function acceptTransfer(uint transferId) external whenNotPaused onlyReceiverAllowed nonReentrant{
+
+        //require(transfers[transferId].id != 0, "Transferencia inexistente");
+        if (transfers[transferId].id == 0) revert TransferDoesNotExist();
+
+        Transfer storage transferItem = transfers[transferId];
+
+        //require(transferItem.status == TransferStatus.Pending, "Transfer not pending");
+        //require(transferItem.to == msg.sender, "Solo receptor puede aceptar transferencias");
+        if (transferItem.status != TransferStatus.Pending) revert TransferNotPending();
+        if (transferItem.to != msg.sender) revert Unauthorized();
+        
+        Token storage token = tokens[transferItem.tokenId];
+        
+        // Incrementar balance del receptor
+        token.balance[transferItem.to] += transferItem.amount;
+
+        // 🔹 ACTUALIZAR CONTADORES DE TOKENS POR USUARIO 🔹
+        // Si el emisor ya no tiene saldo de este token, reduce su contador
+        if (token.balance[transferItem.from] == 0 && userTokenCount[transferItem.from] > 0) {
+            userTokenCount[transferItem.from]--;
+        }
+
+        // Si el receptor no tenía este token antes, incrementa su contador
+        if (token.balance[transferItem.to] == transferItem.amount) {
+            userTokenCount[transferItem.to]++;
+        }
+
+        // Marcar transferencia como aceptada
+        transferItem.status = TransferStatus.Accepted;
+        // Emitir eventos
+        emit TransferAccepted(transferId);
+        emit TransferProcessed(transferId, transferItem.from, transferItem.to, transferItem.status, transferItem.amount);
     }
+
     function rejectTransfer(uint transferId) public {
     }
     function getTransfer(uint transferId) public view returns (Transfer memory) {
