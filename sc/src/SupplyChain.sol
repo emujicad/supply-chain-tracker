@@ -607,15 +607,88 @@ contract SupplyChain  is ReentrancyGuard {
     }
 
     // Gestión de Tokens
-    function createToken(string memory name, uint totalSupply, string memory features, uint parentId) public {
-    }
-    function getToken(uint tokenId) public view returns (uint256 id, address creator, string memory name, TokenType tokenType, uint256 totalSupply, string memory features, uint256 parentId, uint256 dateCreated) {
+   /**
+     * @notice Crea un nuevo token, sea materia prima o producto terminado.
+     * @param name Nombre del token, obligatorio no vacío.
+     * @param tokenType Tipo de token (RowMaterial o FinishedProduct).
+     * @param totalSupply Cantidad total disponible para el token. Debe ser mayor que cero.
+     * @param features Características adicionales en string JSON.
+     * @param parentId ID del token padre. 0 si es materia prima, distinto de 0 para producto terminado.
+     * @dev Lanza error si el padre no existe o si las validaciones fallan.
+     * @dev Incrementa contador de tokens y actualiza balance inicial del creador.
+     */
+    function createToken(string memory name, TokenType tokenType, uint totalSupply, string memory features, uint parentId) external onlyTokenCreators whenNotPaused {
+        if (bytes(name).length == 0) revert InvalidName();
+        if (totalSupply == 0) revert InvalidTotalSupply();
+
+        if (parentId != 0 && tokens[parentId].id == 0) {
+                revert ParentTokenDoesNotExist();
+        }
+
+        Token storage newToken = tokens[nextTokenId];
+        newToken.id = nextTokenId;
+        newToken.creator = msg.sender;
+        newToken.name = name;
+        newToken.tokenType = tokenType;
+        newToken.totalSupply = totalSupply;
+        newToken.features = features;
+        newToken.parentId = parentId;
+        newToken.dateCreated = block.timestamp;
+        newToken.balance[msg.sender] = totalSupply;
+
+        emit TokenCreated(nextTokenId, msg.sender, name, tokenType, totalSupply, parentId);
+
+        unchecked {
+            nextTokenId++;
+        }
+        userTokenCount[msg.sender]++;
     }
 
+    /**
+     * @notice Consulta detalles completos de un token específico.
+     * @param tokenId ID del token a consultar.
+     * @return id ID del token.
+     * @return creator Dirección que creó el token.
+     * @return name Nombre del token.
+     * @return tokenType Tipo del token.
+     * @return totalSupply Suministro total del token.
+     * @return features Características en JSON.
+     * @return parentId Token padre relacionado.
+     * @return dateCreated Timestamp de creación.
+     * @dev Requiere que el token exista.
+     */
+    function getToken(uint tokenId) public view returns (uint256 id, address creator, string memory name, TokenType tokenType, uint256 totalSupply, string memory features, uint256 parentId, uint256 dateCreated) {
+    Token storage token = tokens[tokenId];
+    if (token.id == 0) revert TokenDoesNotExist();
+        return (token.id, token.creator, token.name, token.tokenType, token.totalSupply, token.features, token.parentId, token.dateCreated);
+    }
+
+    /**
+    * @notice Devuelve el total de tokens registrados en el contrato.
+    * @return uint Cantidad total de tokens (ID máximo asignado menos 1).
+    */
+    function getTotalTokens() public view returns (uint) {
+        return nextTokenId - 1;
+    }
+
+    /**
+     * @notice Consulta el balance de un usuario para un token específico.
+     * @param tokenId ID del token.
+     * @param userAddress Dirección del usuario.
+     * @return uint Balance del usuario para ese token.
+     * @dev Requiere dirección válida y token existente.
+     */
     function getTokenBalance(uint tokenId, address userAddress) public view returns (uint) {
+        //require(userAddress != address(0), "Direccion invalida para hacer esta solicitud");
+        if (userAddress == address(0)) revert InvalidAddress();
+        //require(userAddress != owner, "Owner no puede solicitar balance de ningún token");
+        Token storage token = tokens[tokenId];
+        if (token.id == 0) revert TokenDoesNotExist();
+        return token.balance[userAddress];
     }
 
     // Gestión de Transferencias
+
     function transfer(address to, uint tokenId, uint amount) public { 
     }
     function acceptTransfer(uint transferId) public {
