@@ -8,12 +8,14 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 /**
  * @title SupplyChain
- * @notice Solucion de SupplyChain.Este contrato inteligente simula una plataforma de SupplyChain básica en la blockchain.
+ * @notice Solucion de SupplyChain  para uso educativo: modelo de empresas, productos y facturas.
+ * @notice Este contrato inteligente simula una plataforma de SupplyChain básica en la blockchain.
+ * @dev Incluye control de acceso por usuario, validaciones, errores personalizados, contadores para IDs automáticos,
+ *      eventos para la comunicación con el exterior y funciones de consulta (getters) completas.
  * @dev IMPORTANTE: Este contrato no maneja transferencias de fondos (criptomonedas), solo registra datos.
  *      Está diseñado con fines educativos y del proyecto PFM para mostrar cómo se pueden anidar mappings y estructurar
  *      datos complejos en Solidity, una práctica común para simular bases de datos en la blockchain.
  */
-
 
 contract SupplyChain  is ReentrancyGuard {
 
@@ -124,8 +126,7 @@ contract SupplyChain  is ReentrancyGuard {
     error TransferNotPending(); 
 
     /* ======================= ENUMS ======================= */
-
-        /**
+    /**
     * @notice Enum para roles de pausabilidad, básico/pausador.
     */
     enum PauseRole {
@@ -159,7 +160,7 @@ contract SupplyChain  is ReentrancyGuard {
     enum TransferStatus {
         Pending,    //Valor 0
         Accepted,   //Valor 1
-        Rejected,   //Valor 2
+        Rejected,    //Valor 2
         Cancelled   //Valor 3
     }
 
@@ -171,11 +172,13 @@ contract SupplyChain  is ReentrancyGuard {
         FinishedProduct    //Valor 1
     }
 
+    /* ======================= STRUCTS ======================= */
+
     /**
     * @notice Representa los datos principales de un usuario en la plataforma.
     * @dev La relación entre usuario y dirección se gestiona vía mappings addressToUserId y users.
     */
-    struct User {
+   struct User {
         uint256 id;
         address userAddress;
         UserRole role;
@@ -210,14 +213,20 @@ contract SupplyChain  is ReentrancyGuard {
         uint256 amount;   // Cantidad de tokens transferidos
         TransferStatus status;
     }
-
+ 
     address public owner;   // Dirección del administrador/dueño del contrato
-    
-    // Contadores para los ids de los tokens, transfers y users
+    // Declarar variable para candidato a nuevo owner
+    address private pendingOwner;
+
+    // Contadores para los ids de los usurios, tokens y transferencias
+    uint256 public nextUserId = 1;       // ID del próximo usuario
     uint256 public nextTokenId = 1;     // ID del próximo token
     uint256 public nextTransferId = 1;   // ID de la próxima transferencia
-    uint256 public nextUserId = 1;       // ID del próximo usuario
     
+
+    // mapping para asignar roles de pausabilidad a direcciones
+    mapping(address => PauseRole) private pauseRoles;
+
     // mapping para usuarios, los tokens y las transferencias
 
     /**
@@ -236,8 +245,12 @@ contract SupplyChain  is ReentrancyGuard {
     mapping(address => uint256) public addressToUserId;  // Mapeo de direcciones a IDs de usuario
 
     mapping(uint256 => Token) public tokens;             // Mapeo de tokens por ID
-
+    mapping(address => uint) public userTokenCount;
+    
     mapping(uint256 => Transfer) public transfers;       // Mapeo de transfers por ID
+
+    // Estado de pausa
+    bool private paused;
 
     /* ======================= EVENTOS ======================= */
 
@@ -267,13 +280,13 @@ contract SupplyChain  is ReentrancyGuard {
     * @notice Evento al iniciar la transferencia de ownership.
     */
     event OwnershipTransferInitiated(address indexed previousOwner, address indexed newContractOwner);
- 
     /**
     * @notice Evento cuando la transferencia de ownership es confirmada/completada.
     */
     event OwnershipTransferred(address indexed previousOwner, address indexed newContractOwner);
 
     // eventos para los users tokens y transfers
+ 
     /**
     * @notice Evento al solicitar un nuevo rol de usuario.
     */
@@ -284,7 +297,8 @@ contract SupplyChain  is ReentrancyGuard {
     */
     event UserStatusChanged(address indexed user, UserStatus oldStatus, UserStatus newStatus);
 
-   /**
+
+    /**
     * @notice Evento cuando se crea un nuevo token.
     */
     event TokenCreated(uint256 indexed tokenId, address indexed creator, string name, TokenType tokenType, uint256 totalSupply, uint256 parentId);
@@ -293,8 +307,12 @@ contract SupplyChain  is ReentrancyGuard {
     * @notice Evento que representa una solicitud de transferencia.
     */
     event TransferRequested(uint256 indexed transferId, address indexed from, address indexed to, uint256 tokenId, uint256 amount); // Evento de solicitud de transferencia
-
  
+     /**
+    * @notice Evento ante la cancelacion de una transferencia.
+    */
+    event TransferCancelled(uint256 indexed transferId); // Evento de cancellación de transferencia
+
     /**
     * @notice Evento ante la aceptación de una transferencia.
     */
@@ -303,6 +321,8 @@ contract SupplyChain  is ReentrancyGuard {
     * @notice Evento cuando una transferencia ha sido rechazada.
     */
     event TransferRejected(uint256 indexed transferId); // Evento de rechazo de transferencia
+
+    event TransferProcessed(uint indexed transferId, address from, address to, TransferStatus status, uint256 amount);
 
     constructor() {
         owner = msg.sender; // Establece el administrador del contrato como el creador del contrato
@@ -315,72 +335,14 @@ contract SupplyChain  is ReentrancyGuard {
     // verificar condiciones (permisos, estados, etc.) antes de que se ejecuten.
 
     /**
-    * @dev Solo permite acceso a usuarios con rol Producer o Factory y status Approved.
-    */
-    modifier onlyTokenCreators() {
-        User storage user = users[addressToUserId[msg.sender]];
-        if (msg.sender == owner) revert Unauthorized();
-
-        if (!((user.role == UserRole.Producer || user.role == UserRole.Factory) && user.status == UserStatus.Approved)) revert Unauthorized();
-
-        _; // Este símbolo especial indica que se debe ejecutar el cuerpo de la función que usa el modificador.
-    }
-
-    /**
-    * @dev Modificador que restringe la ejecución solo a usuarios con estado Approved
-    *      y rol Producer, Factory o Retailer. Usado para controlar permisos en funciones
-    *      de transferencia de tokens (emisión y envío).
-    */
-    modifier onlyTransfersAllowed() {
-        User storage user = users[addressToUserId[msg.sender]];
-        if (!(user.status == UserStatus.Approved && (user.role == UserRole.Producer || user.role == UserRole.Factory || user.role == UserRole.Retailer))) revert NoTransfersAllowed();
-        _;
-    }
-
-    /**
-    * @dev Modificador que restringe la ejecución solo a usuarios con estado Approved
-    *      y rol Factory, Retailer o Consumer. Usado para controlar permisos en funciones
-    *      que aceptan o rechazan tokens recibidos en transferencias.
-    */
-    modifier onlyReceiverAllowed() {
-        User storage user = users[addressToUserId[msg.sender]];
-        if (!(user.status == UserStatus.Approved && (user.role == UserRole.Factory || user.role == UserRole.Retailer || user.role == UserRole.Consumer))) revert NoReceiverAllowed();
-        _;
-    }
-
-    /**
     * @dev Solo permite acceso al administrator/dueño actual del contrato.
+    * @dev Verifica que quien llama a la función (`msg.sender`) es el dueño o administrador del contrato.
+    *      Si no, revierte la transacción.
     */
     modifier onlyOwner() {
+        //require(owner == msg.sender, "No es el administrador o dueno del contrato");
         if (owner != msg.sender) revert NoOwner();
         _; // Este símbolo especial indica que se debe ejecutar el cuerpo de la función que usa el modificador.
-    }
-
-    /**
-     * @dev Solo permite acceso a usuarios con rol de pausador o dueño/administrador.
-    */
-    // Modificador para restringir funciones solo a pausadores autorizados
-    modifier onlyPauser() {
-        if (pauseRoles[msg.sender] != PauseRole.Pauser && msg.sender != owner) revert Unauthorized();
-        _;
-    }
-
-    /**
-    * @dev Restringe ejecución si el contrato está pausado.
-    */
-    // Modificador para funciones que solo pueden ejecutarse si el contrato NO está pausado
-    modifier whenNotPaused() {
-        if (paused) revert ContractPaused();
-        _;
-    }
-
-    /**
-    * @dev Restringe ejecución si el contrato no está pausado (opcional).
-    */
-    // Modificador para funciones que solo pueden ejecutarse si el contrato está pausado (opcional)
-    modifier whenPaused() {
-        if (!paused) revert ContractNotPaused();
-        _;
     }
 
     /* ======================= FUNCIONES PRINCIPALES:  ======================= */
