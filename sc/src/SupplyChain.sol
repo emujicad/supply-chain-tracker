@@ -17,16 +17,26 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 contract SupplyChain  is ReentrancyGuard {
 
-     /* ======================= ERRORES PERSONALIZADOS ======================= */
+    /* ======================= ERRORES PERSONALIZADOS ======================= */
     /**
     * @notice Lanza si el usuario no tiene aprobación suficiente.
     */
     error NoApproved(); // Se emite cuando una dirección no autorizada intenta ejecutar una función protegida.
-    
+
     /**
     * @notice Lanza si el nombre proporcionado es inválido o vacío.
     */
     error InvalidName(); // Para entradas de datos no válidas, como un nombre.
+
+    /**
+    * @notice Lanza si la dirección es nula o no está permitida.
+    */
+    error InvalidAddress(); // Si la direccion es invalida o no existe.
+ 
+    /**
+    * @notice Lanza si el usuario intenta registrar un rol inválido.
+    */
+    error InvalidRole(); // Para entradas de roles no válidos.
 
     /**
     * @notice Acción no realizada por el owner.
@@ -34,9 +44,84 @@ contract SupplyChain  is ReentrancyGuard {
     error NoOwner(); // Se emite cuando una dirección no autorizada intenta ejecutar una función protegida que solo el owner o administrador del contrato puede ejecutar. 
 
     /**
+    * @notice No autorizado para Transferir token.
+    */   
+    error NoTransfersAllowed();
+
+    /**
+    * @notice No autorizado para Recibir token.
+    */   
+    error NoReceiverAllowed();
+
+    /**
     * @notice Acción no autorizada por el rol actual.
     */
     error Unauthorized(); // Se emite cuando una dirección no autorizada intenta ejecutar una función protegida.
+
+    /**
+    * @notice Acción emitida cuando el contrado está pausado.
+    */
+    error ContractPaused(); // Se emite cuando. 
+
+   /**
+    * @notice Acción emitida cuando el contrado no está pausado.
+    */
+    error ContractNotPaused(); // Se emite cuando.
+
+    /**
+    * @notice El usuario ya tiene al menos un rol aprobado.
+    */
+    error ExistingUserWithApprovedRole(); // Si se intenta registrar. 
+ 
+     /**
+    * @notice La consulta o acción requiere un Usuario existente.
+    */
+    error UserDoesNotExist(); // Si se intenta consultar un usuario que no existe. 
+
+     /**
+    * @notice La consulta o acción requiere un Id de Usuario existente.
+    */
+    error InvalidUserId(); // Si se intenta consultar un id de usuario que no existe. 
+
+    /**
+    * @notice El usuario ya tiene el rol solicitado.
+    */
+    error UserWithExistingRole(); // Si se intenta asignar el mismo rol a un usuario ya existente.
+ 
+    /**
+    * @notice El total de suministro no es válido (>0).
+    */
+    error InvalidTotalSupply();
+ 
+    /**
+    * @notice La consulta o acción requiere un token existente.
+    */
+    error TokenDoesNotExist(); 
+ 
+    /**
+    * @notice La cantidad debe ser mayor a 0.
+    */
+    error InvalidAmount(); 
+
+    /**
+    * @notice La cantidad debe ser mayor a 0.
+    */
+    error InsufficientBalance(uint256 senderBalance, uint256 amount); 
+
+    /**
+    * @notice El token padre solicitado no existe.
+    */
+    error ParentTokenDoesNotExist(); 
+
+    /**
+    * @notice La consulta o acción requiere que la transferencia existenta.
+    */
+    error TransferDoesNotExist(); 
+
+    /**
+    * @notice Transferencia debe estar en Pendiente.
+    */
+    error TransferNotPending(); 
 
     /* ======================= ENUMS ======================= */
 
@@ -230,14 +315,72 @@ contract SupplyChain  is ReentrancyGuard {
     // verificar condiciones (permisos, estados, etc.) antes de que se ejecuten.
 
     /**
+    * @dev Solo permite acceso a usuarios con rol Producer o Factory y status Approved.
+    */
+    modifier onlyTokenCreators() {
+        User storage user = users[addressToUserId[msg.sender]];
+        if (msg.sender == owner) revert Unauthorized();
+
+        if (!((user.role == UserRole.Producer || user.role == UserRole.Factory) && user.status == UserStatus.Approved)) revert Unauthorized();
+
+        _; // Este símbolo especial indica que se debe ejecutar el cuerpo de la función que usa el modificador.
+    }
+
+    /**
+    * @dev Modificador que restringe la ejecución solo a usuarios con estado Approved
+    *      y rol Producer, Factory o Retailer. Usado para controlar permisos en funciones
+    *      de transferencia de tokens (emisión y envío).
+    */
+    modifier onlyTransfersAllowed() {
+        User storage user = users[addressToUserId[msg.sender]];
+        if (!(user.status == UserStatus.Approved && (user.role == UserRole.Producer || user.role == UserRole.Factory || user.role == UserRole.Retailer))) revert NoTransfersAllowed();
+        _;
+    }
+
+    /**
+    * @dev Modificador que restringe la ejecución solo a usuarios con estado Approved
+    *      y rol Factory, Retailer o Consumer. Usado para controlar permisos en funciones
+    *      que aceptan o rechazan tokens recibidos en transferencias.
+    */
+    modifier onlyReceiverAllowed() {
+        User storage user = users[addressToUserId[msg.sender]];
+        if (!(user.status == UserStatus.Approved && (user.role == UserRole.Factory || user.role == UserRole.Retailer || user.role == UserRole.Consumer))) revert NoReceiverAllowed();
+        _;
+    }
+
+    /**
     * @dev Solo permite acceso al administrator/dueño actual del contrato.
-    * @dev Verifica que quien llama a la función (`msg.sender`) es el dueño o administrador del contrato.
-    *      Si no, revierte la transacción.
     */
     modifier onlyOwner() {
-        //require(owner == msg.sender, "No es el administrador o dueno del contrato");
         if (owner != msg.sender) revert NoOwner();
         _; // Este símbolo especial indica que se debe ejecutar el cuerpo de la función que usa el modificador.
+    }
+
+    /**
+     * @dev Solo permite acceso a usuarios con rol de pausador o dueño/administrador.
+    */
+    // Modificador para restringir funciones solo a pausadores autorizados
+    modifier onlyPauser() {
+        if (pauseRoles[msg.sender] != PauseRole.Pauser && msg.sender != owner) revert Unauthorized();
+        _;
+    }
+
+    /**
+    * @dev Restringe ejecución si el contrato está pausado.
+    */
+    // Modificador para funciones que solo pueden ejecutarse si el contrato NO está pausado
+    modifier whenNotPaused() {
+        if (paused) revert ContractPaused();
+        _;
+    }
+
+    /**
+    * @dev Restringe ejecución si el contrato no está pausado (opcional).
+    */
+    // Modificador para funciones que solo pueden ejecutarse si el contrato está pausado (opcional)
+    modifier whenPaused() {
+        if (!paused) revert ContractNotPaused();
+        _;
     }
 
     /* ======================= FUNCIONES PRINCIPALES:  ======================= */
