@@ -13,7 +13,7 @@ contract SupplyChainTest is Test {
 
     function setUp() public {
         // Inicializar el contrato SupplyChain
-        SupplyChain supplyChain = new SupplyChain();
+        supplyChain = new SupplyChain();
         // Configurar usuarios de prueba, roles y estados iniciales
     }
 

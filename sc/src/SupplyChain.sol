@@ -4,7 +4,8 @@
 
 pragma solidity 0.8.30;
 
-import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import { ReentrancyGuard } from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+
 
 /**
  * @title SupplyChain
@@ -329,7 +330,7 @@ contract SupplyChain  is ReentrancyGuard {
         emit AssignInitialContractOwner(owner);
     }   
     
- /* ======================= MODIFICADORES ======================= */
+    /* ======================= MODIFICADORES ======================= */
 
     // Los modificadores son código reutilizable que se puede añadir a las funciones para
     // verificar condiciones (permisos, estados, etc.) antes de que se ejecuten.
@@ -338,14 +339,7 @@ contract SupplyChain  is ReentrancyGuard {
     * @dev Solo permite acceso a usuarios con rol Producer o Factory y status Approved.
     */
     modifier onlyTokenCreators() {
-        User storage user = users[addressToUserId[msg.sender]];
-        //require(msg.sender != address(0), "Direccion invalida para hacer esta solicitud");
-        //require(msg.sender != owner, "El dueno del contrato no puede crear tokens");
-        if (msg.sender == owner) revert Unauthorized();
-
-        //require((user.role == UserRole.Producer || user.role == UserRole.Factory) && user.status == UserStatus.Approved, "Sin permisos para crear tokens");  
-        if (!((user.role == UserRole.Producer || user.role == UserRole.Factory) && user.status == UserStatus.Approved)) revert Unauthorized();
-
+        _onlyTokenCreators();
         _; // Este símbolo especial indica que se debe ejecutar el cuerpo de la función que usa el modificador.
     }
 
@@ -355,10 +349,8 @@ contract SupplyChain  is ReentrancyGuard {
     *      de transferencia de tokens (emisión y envío).
     */
     modifier onlyTransfersAllowed() {
-        User storage user = users[addressToUserId[msg.sender]];
-        //require(user.status == UserStatus.Approved && (user.role == UserRole.Producer || user.role == UserRole.Factory || user.role == UserRole.Retailer), "No autorizado para transferir tokens");
-        if (!(user.status == UserStatus.Approved && (user.role == UserRole.Producer || user.role == UserRole.Factory || user.role == UserRole.Retailer))) revert NoTransfersAllowed();
-        _;
+        _onlyTransfersAllowed();
+        _;        
     }
 
     /**
@@ -367,9 +359,7 @@ contract SupplyChain  is ReentrancyGuard {
     *      que aceptan o rechazan tokens recibidos en transferencias.
     */
     modifier onlyReceiverAllowed() {
-        User storage user = users[addressToUserId[msg.sender]];
-        if (!(user.status == UserStatus.Approved && (user.role == UserRole.Factory || user.role == UserRole.Retailer || user.role == UserRole.Consumer))) revert NoReceiverAllowed();
-        //require(user.status == UserStatus.Approved && (user.role == UserRole.Factory || user.role == UserRole.Retailer || user.role == UserRole.Consumer), "No autorizado para recibir o rechazar tokens");
+        _onlyReceiverAllowed();
         _;
     }
 
@@ -377,8 +367,7 @@ contract SupplyChain  is ReentrancyGuard {
     * @dev Solo permite acceso al administrator/dueño actual del contrato.
     */
     modifier onlyOwner() {
-        //require(owner == msg.sender, "No es el administrador o dueno del contrato");
-        if (owner != msg.sender) revert NoOwner();
+        _onlyOwner();
         _; // Este símbolo especial indica que se debe ejecutar el cuerpo de la función que usa el modificador.
     }
 
@@ -387,8 +376,7 @@ contract SupplyChain  is ReentrancyGuard {
     */
     // Modificador para restringir funciones solo a pausadores autorizados
     modifier onlyPauser() {
-        //require(pauseRoles[msg.sender] == PauseRole.Pauser || msg.sender == owner, "No autorizado para pausar");
-        if (pauseRoles[msg.sender] != PauseRole.Pauser && msg.sender != owner) revert Unauthorized();
+        _onlyPauser();
         _;
     }
 
@@ -397,8 +385,7 @@ contract SupplyChain  is ReentrancyGuard {
     */
     // Modificador para funciones que solo pueden ejecutarse si el contrato NO está pausado
     modifier whenNotPaused() {
-        //require(!paused, "Contrato pausado");
-        if (paused) revert ContractPaused();
+        _whenNotPaused();
         _;
     }
 
@@ -407,12 +394,43 @@ contract SupplyChain  is ReentrancyGuard {
     */
     // Modificador para funciones que solo pueden ejecutarse si el contrato está pausado (opcional)
     modifier whenPaused() {
-        //require(paused, "Contrato no esta pausado");
-        if (!paused) revert ContractNotPaused();
+        _whenPaused();
         _;
     }
+    
+/* ======================= FUNCIONES PRINCIPALES: ======================= */
 
-/* ======================= FUNCIONES PRINCIPALES: ejemplos ======================= */
+    function _onlyOwner() internal view {
+        if (owner != msg.sender) revert NoOwner();
+    }
+
+    function _onlyPauser() internal view {
+        if (pauseRoles[msg.sender] != PauseRole.Pauser && msg.sender != owner) revert Unauthorized();
+    }
+
+    function _onlyTokenCreators() internal view {
+        User storage user = users[addressToUserId[msg.sender]];
+        if (msg.sender == owner) revert Unauthorized();
+         if (!((user.role == UserRole.Producer || user.role == UserRole.Factory) && user.status == UserStatus.Approved)) revert Unauthorized();
+     }
+
+    function _onlyReceiverAllowed() internal view {
+        User storage user = users[addressToUserId[msg.sender]];
+        if (!(user.status == UserStatus.Approved && (user.role == UserRole.Factory || user.role == UserRole.Retailer || user.role == UserRole.Consumer))) revert NoReceiverAllowed();
+    }
+
+    function _onlyTransfersAllowed() internal view {
+        User storage user = users[addressToUserId[msg.sender]];
+        if (!(user.status == UserStatus.Approved && (user.role == UserRole.Producer || user.role == UserRole.Factory || user.role == UserRole.Retailer))) revert NoTransfersAllowed();
+    }
+
+    function _whenPaused() internal view {
+        if (!paused) revert ContractNotPaused();
+    }
+
+    function _whenNotPaused() internal view {
+        if (paused) revert ContractPaused();
+    }
 
     /**
     * @notice Asigna o revoca el rol Pauser a una dirección, controlando autorización para pausar/reanudar.
@@ -458,7 +476,6 @@ contract SupplyChain  is ReentrancyGuard {
     * @dev Solo puede ser llamada por el owner y requiere contrato activo (no pausado).
     */
     function initiateOwnershipTransfer(address newOwner) external onlyOwner whenNotPaused {
-        //require(newOwner != address(0), "Nueva direccion invalida");
         if (newOwner == address(0)) revert InvalidAddress();
         pendingOwner = newOwner;
         emit OwnershipTransferInitiated(owner, newOwner);
@@ -469,7 +486,6 @@ contract SupplyChain  is ReentrancyGuard {
     * @dev Solo llamable por el address pendingOwner previamente configurado.
     */
     function acceptOwnership() external whenNotPaused {
-        //require(msg.sender == pendingOwner, "Solo nuevo owner puede aceptar");
         if (msg.sender != pendingOwner) revert Unauthorized();
         address oldOwner = owner;
         owner = pendingOwner;
@@ -485,7 +501,6 @@ contract SupplyChain  is ReentrancyGuard {
         return pendingOwner;
     }
 
-    // Gestión de Usuarios
     // Gestión de Usuarios
     /**
     * @notice Función para que usuarios, excepto el owner, soliciten un rol en la plataforma.
@@ -548,7 +563,6 @@ contract SupplyChain  is ReentrancyGuard {
     * @param newStatus Estado a asignar.
     */
     function changeStatusUser(address userAddress, UserStatus newStatus) external onlyOwner whenNotPaused {
-        //require(addressToUserId[userAddress] != 0, "Usuario no existe");
         if (addressToUserId[userAddress] == 0) revert UserDoesNotExist();
 
         if (msg.sender == address(0) || owner == userAddress ) revert InvalidAddress();
@@ -576,7 +590,6 @@ contract SupplyChain  is ReentrancyGuard {
     * @dev Requiere que el ID sea válido (mayor que 0 y menor que el próximo ID).
     */
     function getUserInfoById(uint userId) public view returns (User memory) {
-        //require(userId > 0 && userId < nextUserId, "User ID invalido");
         if (userId == 0 || userId >= nextUserId) revert InvalidUserId();
         return users[userId];
     }
@@ -595,7 +608,6 @@ contract SupplyChain  is ReentrancyGuard {
     * @return True si es owner, false en caso contrario.
     */
     function isAdmin(address userAddress) public view returns (bool) {
-        //require(userAddress != address(0), "Direccion invalida para hacer esta solicitud");
         if (userAddress == address(0)) revert InvalidAddress();
 
         if (owner == userAddress ) {
@@ -607,7 +619,7 @@ contract SupplyChain  is ReentrancyGuard {
     }
 
     // Gestión de Tokens
-   /**
+    /**
      * @notice Crea un nuevo token, sea materia prima o producto terminado.
      * @param name Nombre del token, obligatorio no vacío.
      * @param tokenType Tipo de token (RowMaterial o FinishedProduct).
@@ -616,7 +628,7 @@ contract SupplyChain  is ReentrancyGuard {
      * @param parentId ID del token padre. 0 si es materia prima, distinto de 0 para producto terminado.
      * @dev Lanza error si el padre no existe o si las validaciones fallan.
      * @dev Incrementa contador de tokens y actualiza balance inicial del creador.
-     */
+    */
     function createToken(string memory name, TokenType tokenType, uint totalSupply, string memory features, uint parentId) external onlyTokenCreators whenNotPaused {
         if (bytes(name).length == 0) revert InvalidName();
         if (totalSupply == 0) revert InvalidTotalSupply();
@@ -679,9 +691,7 @@ contract SupplyChain  is ReentrancyGuard {
      * @dev Requiere dirección válida y token existente.
      */
     function getTokenBalance(uint tokenId, address userAddress) public view returns (uint) {
-        //require(userAddress != address(0), "Direccion invalida para hacer esta solicitud");
         if (userAddress == address(0)) revert InvalidAddress();
-        //require(userAddress != owner, "Owner no puede solicitar balance de ningún token");
         Token storage token = tokens[tokenId];
         if (token.id == 0) revert TokenDoesNotExist();
         return token.balance[userAddress];
@@ -698,9 +708,6 @@ contract SupplyChain  is ReentrancyGuard {
     * @dev Se crea una transferencia en estado Pending, su aceptación o rechazo se debe manejar con funciones específicas.
     */
     function transfer(address to, uint tokenId, uint amount) external whenNotPaused onlyTransfersAllowed nonReentrant{
-
-        //require(to != address(0), "Direccion destino invalida");
-        //require(amount > 0, "Cantidad debe ser mayor que cero");
         if (to == address(0)) revert InvalidAddress();
         if (amount == 0) revert InvalidAmount();
         
@@ -708,7 +715,6 @@ contract SupplyChain  is ReentrancyGuard {
         if (token.id == 0) revert TokenDoesNotExist();
 
         uint256 senderBalance = token.balance[msg.sender];
-        //require(senderBalance >= amount, "Saldo insuficiente para transferencia");
         if (senderBalance < amount) revert InsufficientBalance(senderBalance, amount);
 
         // Disminuir balance del remitente inmediatamente para evitar doble gasto
@@ -740,14 +746,10 @@ contract SupplyChain  is ReentrancyGuard {
     *      Requiere que el contrato no esté pausado.
     */
     function acceptTransfer(uint transferId) external whenNotPaused onlyReceiverAllowed nonReentrant{
-
-        //require(transfers[transferId].id != 0, "Transferencia inexistente");
         if (transfers[transferId].id == 0) revert TransferDoesNotExist();
 
         Transfer storage transferItem = transfers[transferId];
 
-        //require(transferItem.status == TransferStatus.Pending, "Transfer not pending");
-        //require(transferItem.to == msg.sender, "Solo receptor puede aceptar transferencias");
         if (transferItem.status != TransferStatus.Pending) revert TransferNotPending();
         if (transferItem.to != msg.sender) revert Unauthorized();
         
@@ -774,14 +776,19 @@ contract SupplyChain  is ReentrancyGuard {
         emit TransferProcessed(transferId, transferItem.from, transferItem.to, transferItem.status, transferItem.amount);
     }
 
+    /**
+    * @notice Cancela una transferencia pendiente por parte del emisor, completando el movimiento de tokens entre usuarios.
+    * @param transferId ID de la transferencia a cancelar.
+    * @dev Solo puede ser llamada por el emisor de la transferencia..
+    *      Actualiza balances y estado de transferencia.
+    *      Emite el evento TransferCanceller.
+    *      Requiere que el contrato no esté pausado.
+    */
     function cancelTransfer(uint transferId) external whenNotPaused onlyTransfersAllowed nonReentrant{
-         //require(transfers[transferId].id != 0, "Transferencia inexistente");
         if (transfers[transferId].id == 0) revert TransferDoesNotExist();
 
         Transfer storage transferItem = transfers[transferId];
 
-        //require(transferItem.status == TransferStatus.Pending, "Transfer not pending");
-        //require(transferItem.from == msg.sender, "Solo receptor puede rechazar transferencias");
         if (transferItem.status != TransferStatus.Pending) revert TransferNotPending();
         if (transferItem.from != msg.sender) revert Unauthorized();
         
@@ -814,8 +821,6 @@ contract SupplyChain  is ReentrancyGuard {
     */
     function rejectTransfer(uint transferId) external whenNotPaused onlyReceiverAllowed nonReentrant {
         Transfer storage transferItem = transfers[transferId];
-        //require(transferItem.status == TransferStatus.Pending, "Transfer not pending");
-        //require(transferItem.to == msg.sender, "Solo receptor puede rechazar transferencias");
         if (transferItem.status != TransferStatus.Pending) revert TransferNotPending();
         if (transferItem.to != msg.sender) revert Unauthorized();
 
@@ -868,19 +873,6 @@ contract SupplyChain  is ReentrancyGuard {
      *      - Puede fallar por límite de gas si hay demasiados tokens (>1000)
      */
 
-    // Funciones auxiliares
-    /**
-     * @notice Obtiene la lista de IDs de tokens que el usuario posee con saldo positivo.
-     * @param userAddress Dirección del usuario.
-     * @return uint[] Array con IDs de tokens activos para el usuario.
-     * @dev ⚠️ ADVERTENCIA DE GAS: Esta función puede ser MUY COSTOSA en gas con muchos tokens.
-     *      Itera sobre TODOS los tokens existentes (O(n) donde n = cantidad total de tokens).
-     *      Recomendaciones:
-     *      - Solo para uso OFF-CHAIN (lectura desde frontend/dApps)
-     *      - NO llamar desde otros contratos en transacciones on-chain
-     *      - Considerar paginación o indexación off-chain para datasets grandes
-     *      - Puede fallar por límite de gas si hay demasiados tokens (>1000)
-     */
     function getUserTokens(address userAddress) public view returns (uint[] memory) {
         uint[] memory userTokens = new uint[](userTokenCount[userAddress]);
         uint index = 0;
