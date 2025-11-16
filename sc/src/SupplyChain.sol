@@ -484,17 +484,126 @@ contract SupplyChain  is ReentrancyGuard {
     function getPendingOwner() public view returns (address) {
         return pendingOwner;
     }
-    
+
     // Gestión de Usuarios
-    function requestUserRole(string memory role) public { 
-    }
-    function changeStatusUser(address userAddress, UserStatus newStatus) public {
+    // Gestión de Usuarios
+    /**
+    * @notice Función para que usuarios, excepto el owner, soliciten un rol en la plataforma.
+    * @param role Role solicitado.
+    */
+    function requestUserRole(UserRole role) external whenNotPaused { 
+        uint256 userId;
+
+        //if (msg.sender == address(0) || owner == msg.sender ) revert InvalidAddress();
+        if (owner == msg.sender ) revert InvalidAddress();
+        //if (bytes(role).length == 0) revert InvalidEntry("role");
+        if (uint(role) > 3 ) revert InvalidRole();
+
+        // `storage` crea una referencia a la variable en el almacenamiento de la blockchain.
+        // Modificar `u` modifica directamente el estado del contrato.
+
+        userId = addressToUserId[msg.sender];
+        bool userExists = (userId != 0);
+        if ( userExists) {
+            
+            User storage user = users[userId];
+
+            //if (uint(role) ==  users[nextUserId].role) {
+            if (uint(role) ==  uint(user.role)) {
+                revert UserWithExistingRole();
+            }
+
+            if  (user.status == UserStatus.Approved) {
+                revert ExistingUserWithApprovedRole();
+            }
+
+            if  (user.status != UserStatus.Pending) {
+                user.status = UserStatus.Pending;
+            }
+            user.role = role;
+            emit UserRoleRequested(msg.sender, role);
+        }
+            
+        else{
+            //crea un nuevo User con el ID actual, la dirección que llamó a la función (msg.sender), el rol recibido como parámetro, y un estado definido Pending
+            User storage user = users[nextUserId];
+            user.id = nextUserId;
+            user.userAddress = msg.sender;
+            user.role = role;
+            user.status = UserStatus.Pending;
+
+            addressToUserId[msg.sender] = nextUserId; //establece la relación entre la dirección y el ID del usuario. 
+            // Incrementar el ID para el próximo usuario
+            
+            unchecked {
+                nextUserId++;
+            }
+            emit UserRoleRequested(msg.sender, role);
+        }
     }
 
+    /**
+    * @notice Solo el owner puede cambiar el estado de un usuario.
+    * @param userAddress Dirección del usuario.
+    * @param newStatus Estado a asignar.
+    */
+    function changeStatusUser(address userAddress, UserStatus newStatus) external onlyOwner whenNotPaused {
+        //require(addressToUserId[userAddress] != 0, "Usuario no existe");
+        if (addressToUserId[userAddress] == 0) revert UserDoesNotExist();
+
+        if (msg.sender == address(0) || owner == userAddress ) revert InvalidAddress();
+        User storage user = users[addressToUserId[userAddress]]; //establece la relación entre la dirección y el ID del usuario.
+
+        UserStatus oldStatus = user.status;
+        user.status = newStatus;
+        emit UserStatusChanged(userAddress, oldStatus, newStatus); 
+    }
+
+    /**
+    * @notice Devuelve información completa de un usuario registrado.
+    * @param userAddress Dirección del usuario consultado.
+    * @return user Información del usuario.
+    */
     function getUserInfo(address userAddress) public view returns (User memory) {
+        if (msg.sender == address(0) || owner == userAddress ) revert InvalidAddress();
+        return users[addressToUserId[userAddress]];
     }
 
+    /**
+    * @notice Devuelve información de un usuario registrado a partir de su ID.
+    * @param userId Identificador del usuario.
+    * @return User Estructura con datos del usuario.
+    * @dev Requiere que el ID sea válido (mayor que 0 y menor que el próximo ID).
+    */
+    function getUserInfoById(uint userId) public view returns (User memory) {
+        //require(userId > 0 && userId < nextUserId, "User ID invalido");
+        if (userId == 0 || userId >= nextUserId) revert InvalidUserId();
+        return users[userId];
+    }
+
+    /**
+    * @notice Devuelve el total de usuarios registrados en el contrato.
+    * @return uint Cantidad total de usuarios (ID máximo asignado menos 1).
+    */
+    function getTotalUsers() public view returns (uint) {
+        return nextUserId - 1;
+    }
+
+    /**
+    * @notice Devuelve si el usuario dado es admin del contrato.
+    * @param userAddress Dirección a consultar.
+    * @return True si es owner, false en caso contrario.
+    */
     function isAdmin(address userAddress) public view returns (bool) {
+        //require(userAddress != address(0), "Direccion invalida para hacer esta solicitud");
+        if (userAddress == address(0)) revert InvalidAddress();
+
+        if (owner == userAddress ) {
+            return true;
+        }
+        else {
+            return false;
+        }
     }
 
     // Gestión de Tokens
