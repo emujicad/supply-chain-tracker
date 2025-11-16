@@ -774,10 +774,99 @@ contract SupplyChain  is ReentrancyGuard {
         emit TransferProcessed(transferId, transferItem.from, transferItem.to, transferItem.status, transferItem.amount);
     }
 
-    function rejectTransfer(uint transferId) public {
+    function cancelTransfer(uint transferId) external whenNotPaused onlyTransfersAllowed nonReentrant{
+         //require(transfers[transferId].id != 0, "Transferencia inexistente");
+        if (transfers[transferId].id == 0) revert TransferDoesNotExist();
+
+        Transfer storage transferItem = transfers[transferId];
+
+        //require(transferItem.status == TransferStatus.Pending, "Transfer not pending");
+        //require(transferItem.from == msg.sender, "Solo receptor puede rechazar transferencias");
+        if (transferItem.status != TransferStatus.Pending) revert TransferNotPending();
+        if (transferItem.from != msg.sender) revert Unauthorized();
+        
+        Token storage token = tokens[transferItem.tokenId];
+        
+        // 🔹 Verificar si el emisor tenía 0 unidades antes de devolver los tokens
+        bool senderHadZeroBefore = (token.balance[transferItem.from] == 0);
+
+        // Regresar tokens al remitente
+        token.balance[transferItem.from] += transferItem.amount;
+
+        // 🔹 Si el emisor no tenía este token antes, incrementa su contador
+        if (senderHadZeroBefore) {
+            userTokenCount[transferItem.from]++;
+        }
+
+        // Marcar transferencia como aceptada
+        transferItem.status = TransferStatus.Cancelled;
+        // Emitir eventos
+        emit TransferCancelled(transferId);
+        emit TransferProcessed(transferId, transferItem.from, transferItem.to, transferItem.status, transferItem.amount);  
     }
+
+    /**
+    * @notice Rechaza una transferencia pendiente, retornando la cantidad al remitente.
+    * @param transferId ID de la transferencia a rechazar.
+    * @dev Solo puede ser llamada por el destinatario de la transferencia.
+    *      Restaura balance del remitente, actualiza estado y emite evento TransferRejected.
+    *      Requiere que el contrato no esté pausado.
+    */
+    function rejectTransfer(uint transferId) external whenNotPaused onlyReceiverAllowed nonReentrant {
+        Transfer storage transferItem = transfers[transferId];
+        //require(transferItem.status == TransferStatus.Pending, "Transfer not pending");
+        //require(transferItem.to == msg.sender, "Solo receptor puede rechazar transferencias");
+        if (transferItem.status != TransferStatus.Pending) revert TransferNotPending();
+        if (transferItem.to != msg.sender) revert Unauthorized();
+
+        Token storage token = tokens[transferItem.tokenId];
+
+        // 🔹 Verificar si el emisor tenía 0 unidades antes de devolver los tokens
+        bool senderHadZeroBefore = (token.balance[transferItem.from] == 0);
+
+        // Regresar tokens al remitente
+        token.balance[transferItem.from] += transferItem.amount;
+
+        // 🔹 Si el emisor no tenía este token antes, incrementa su contador
+        if (senderHadZeroBefore) {
+            userTokenCount[transferItem.from]++;
+        }
+
+        // Marcar transferencia como rechazada
+        transferItem.status = TransferStatus.Rejected;
+        emit TransferRejected(transferId);
+        emit TransferProcessed(transferId, transferItem.from, transferItem.to, transferItem.status, transferItem.amount);
+    }
+    /**
+     * @notice Consulta el detalle completo de una transferencia por su ID.
+     * @param transferId ID de la transferencia a consultar.
+     * @return Transfer Estructura completa con datos de la transferencia.
+     */
     function getTransfer(uint transferId) public view returns (Transfer memory) {
+        return transfers[transferId];
     }
+
+    /**
+    * @notice Devuelve el total de transferencias creadas en el contrato.
+    * @return uint Cantidad total de transferencias (ID máximo asignado menos 1).
+    */
+    function getTotalTransfers() public view returns (uint) {
+        return nextTransferId - 1;
+    }
+
+    // Funciones auxiliares
+    /**
+     * @notice Obtiene la lista de IDs de tokens que el usuario posee con saldo positivo.
+     * @param userAddress Dirección del usuario.
+     * @return uint[] Array con IDs de tokens activos para el usuario.
+     * @dev ⚠️ ADVERTENCIA DE GAS: Esta función puede ser MUY COSTOSA en gas con muchos tokens.
+     *      Itera sobre TODOS los tokens existentes (O(n) donde n = cantidad total de tokens).
+     *      Recomendaciones:
+     *      - Solo para uso OFF-CHAIN (lectura desde frontend/dApps)
+     *      - NO llamar desde otros contratos en transacciones on-chain
+     *      - Considerar paginación o indexación off-chain para datasets grandes
+     *      - Puede fallar por límite de gas si hay demasiados tokens (>1000)
+     */
 
     // Funciones auxiliares
     function getUserTokens(address userAddress) public view returns (uint[] memory) {
