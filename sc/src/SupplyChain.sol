@@ -8,20 +8,48 @@ contract SupplyChain {
 
     error NoApproved(); // Se emite cuando una dirección no autorizada intenta ejecutar una función protegida.
     error EntradaInvalida(string campo); // Para entradas de datos no válidas, como un nombre.
+    /**
+    * @notice Acción no autorizada por el rol actual.
+    */
+    error NoAutorizado(); // Se emite cuando una dirección no autorizada intenta ejecutar una función protegida.
 
 
+    /**
+    * @notice Enum para estados de usuario: pendiente, aprobado, rechazado o cancelado.
+    */
     enum UserStatus { 
-        /* Estados del usuario */ 
-        Pending,    //Valor 1 
-        Approved,   //Valor 2
-        Rejected,   //Valor 3
-        Canceled    //Valor 4
+        Pending,    //Valor 0 
+        Approved,   //Valor 1
+        Rejected,   //Valor 2
+        Canceled    //Valor 3
     }
+
+    /**
+    * @notice Enum para los roles básicos de la cadena de suministro.
+    */
+    enum UserRole { 
+        Producer,   //Valor 0
+        Factory,    //Valor 1
+        Retailer,   //Valor 2
+        Consumer    //Valor 3
+    }
+
+    /**
+    * @notice Enum para el estado de una transferencia de tokens.
+    */
     enum TransferStatus {
-        /* Estados de transferencia */ 
-        Pending,    //Valor 1
-        Accepted,   //Valor 2
-        Rejected    //Valor 3
+        Pending,    //Valor 0
+        Accepted,   //Valor 1
+        Rejected,   //Valor 2
+        Cancelled   //Valor 3
+    }
+
+    /**
+    * @notice Enum para diferenciar tokens de materia prima y producto terminado.
+    */ 
+    enum TokenType {
+        RowMaterial,       //Valor 0
+        FinishedProduct    //Valor 1
     }
 
     struct Token {
@@ -93,7 +121,7 @@ contract SupplyChain {
     }
 
 
-    / Gestión de Usuarios
+    // Gestión de Usuarios
     function requestUserRole(string memory role) public { 
     }
     function changeStatusUser(address userAddress, UserStatus newStatus) public {
@@ -108,7 +136,7 @@ contract SupplyChain {
     // Gestión de Tokens
     function createToken(string memory name, uint totalSupply, string memory features, uint parentId) public {
     }
-    function getToken(uint tokenId) public view returns (Token memory) {
+    function getToken(uint tokenId) public view returns (uint256 id, address creator, string memory name, TokenType tokenType, uint256 totalSupply, string memory features, uint256 parentId, uint256 dateCreated) {
     }
 
     function getTokenBalance(uint tokenId, address userAddress) public view returns (uint) {
