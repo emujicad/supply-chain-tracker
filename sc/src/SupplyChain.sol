@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 // Define la versión del compilador de Solidity a utilizar.
-// En este caso, es compatible con versiones desde 0.8.2 hasta antes de 0.9.0.
+// En este caso, es compatible con versiones desde 0.8.30.
 
-pragma solidity ^0.8.13;
+pragma solidity 0.8.30;
 
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
@@ -39,6 +39,15 @@ contract SupplyChain  is ReentrancyGuard {
     error Unauthorized(); // Se emite cuando una dirección no autorizada intenta ejecutar una función protegida.
 
     /* ======================= ENUMS ======================= */
+
+        /**
+    * @notice Enum para roles de pausabilidad, básico/pausador.
+    */
+    enum PauseRole {
+        None,
+        Pauser
+    }
+
     /**
     * @notice Enum para estados de usuario: pendiente, aprobado, rechazado o cancelado.
     */
@@ -148,12 +157,38 @@ contract SupplyChain  is ReentrancyGuard {
     /* ======================= EVENTOS ======================= */
 
     /**
+     * @notice Evento para pausar el contrato.
+     */
+    // Evento para emitir cuando cambie el estado de pausa
+    event Paused(address account);
+
+    /**
+    * @notice Evento para reanudar el contrato.
+    */
+    event Unpaused(address account);
+
+    /**
+    * @notice Evento al asignar roles especiales de pausador o revocar.
+    */
+    // Evento para asignar o revocar rol Pauser
+    event PauseRoleChanged(address indexed account, PauseRole role);
+
+    /**
     * @notice Evento de asignación inicial de ownership.
     */
     event AssignInitialContractOwner(address indexed initialContractOwner);
 
-    // eventos para los users, token y transfers
+    /**
+    * @notice Evento al iniciar la transferencia de ownership.
+    */
+    event OwnershipTransferInitiated(address indexed previousOwner, address indexed newContractOwner);
+ 
+    /**
+    * @notice Evento cuando la transferencia de ownership es confirmada/completada.
+    */
+    event OwnershipTransferred(address indexed previousOwner, address indexed newContractOwner);
 
+    // eventos para los users tokens y transfers
     /**
     * @notice Evento al solicitar un nuevo rol de usuario.
     */
