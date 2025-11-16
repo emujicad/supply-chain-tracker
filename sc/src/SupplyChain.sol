@@ -869,9 +869,66 @@ contract SupplyChain  is ReentrancyGuard {
      */
 
     // Funciones auxiliares
+    /**
+     * @notice Obtiene la lista de IDs de tokens que el usuario posee con saldo positivo.
+     * @param userAddress Dirección del usuario.
+     * @return uint[] Array con IDs de tokens activos para el usuario.
+     * @dev ⚠️ ADVERTENCIA DE GAS: Esta función puede ser MUY COSTOSA en gas con muchos tokens.
+     *      Itera sobre TODOS los tokens existentes (O(n) donde n = cantidad total de tokens).
+     *      Recomendaciones:
+     *      - Solo para uso OFF-CHAIN (lectura desde frontend/dApps)
+     *      - NO llamar desde otros contratos en transacciones on-chain
+     *      - Considerar paginación o indexación off-chain para datasets grandes
+     *      - Puede fallar por límite de gas si hay demasiados tokens (>1000)
+     */
     function getUserTokens(address userAddress) public view returns (uint[] memory) {
+        uint[] memory userTokens = new uint[](userTokenCount[userAddress]);
+        uint index = 0;
+        for (uint i = 1; i < nextTokenId; i++) {
+            if (tokens[i].balance[userAddress] > 0) {
+                userTokens[index] = i;
+                index++;
+            }
+        }
+        return userTokens;
     }
+
+    /**
+    * @notice Obtiene un arreglo de los IDs de todas las transferencias asociadas a un usuario como remitente o destinatario.
+    * @param userAddress Dirección del usuario a consultar.
+    * @return uint[] Array dinámico con los IDs de transferencias relacionadas.
+    * @dev ⚠️ ADVERTENCIA DE GAS: Esta función es EXTREMADAMENTE COSTOSA en gas con muchas transferencias.
+    *      Realiza DOS iteraciones completas sobre TODAS las transferencias existentes:
+    *      - Primera iteración: cuenta transferencias del usuario (O(n))
+    *      - Segunda iteración: copia transferencias al array resultado (O(n))
+    *      Complejidad total: O(2n) donde n = cantidad total de transferencias
+    *      Recomendaciones:
+    *      - SOLO para uso OFF-CHAIN (lectura desde frontend/dApps)
+    *      - NUNCA llamar desde otros contratos en transacciones on-chain
+    *      - Implementar indexación off-chain usando eventos para datasets grandes
+    *      - Puede fallar por límite de gas si hay >500 transferencias
+    *      - Considerar paginación: getUserTransfers(user, startId, endId)
+    */
+
     function getUserTransfers(address userAddress) public view returns (uint[] memory) {
+        uint count = 0;
+        // Primera pasada para contar las transferencias asociadas
+        for (uint i = 1; i < nextTransferId; i++) {
+            if (transfers[i].from == userAddress || transfers[i].to == userAddress) {
+                count++;
+            }
+        }
+
+        uint[] memory userTransfers = new uint[](count);
+        uint index = 0;
+        // Segunda pasada para almacenar los IDs de transferencia
+        for (uint i = 1; i < nextTransferId; i++) {
+            if (transfers[i].from == userAddress || transfers[i].to == userAddress) {
+                userTransfers[index] = i;
+                index++;
+             }
+        }
+        return userTransfers;
     }
 
     receive() external payable {
