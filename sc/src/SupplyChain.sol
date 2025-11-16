@@ -329,15 +329,52 @@ contract SupplyChain  is ReentrancyGuard {
         emit AssignInitialContractOwner(owner);
     }   
     
-    /* ======================= MODIFICADORES ======================= */
+ /* ======================= MODIFICADORES ======================= */
 
     // Los modificadores son código reutilizable que se puede añadir a las funciones para
     // verificar condiciones (permisos, estados, etc.) antes de que se ejecuten.
 
     /**
+    * @dev Solo permite acceso a usuarios con rol Producer o Factory y status Approved.
+    */
+    modifier onlyTokenCreators() {
+        User storage user = users[addressToUserId[msg.sender]];
+        //require(msg.sender != address(0), "Direccion invalida para hacer esta solicitud");
+        //require(msg.sender != owner, "El dueno del contrato no puede crear tokens");
+        if (msg.sender == owner) revert Unauthorized();
+
+        //require((user.role == UserRole.Producer || user.role == UserRole.Factory) && user.status == UserStatus.Approved, "Sin permisos para crear tokens");  
+        if (!((user.role == UserRole.Producer || user.role == UserRole.Factory) && user.status == UserStatus.Approved)) revert Unauthorized();
+
+        _; // Este símbolo especial indica que se debe ejecutar el cuerpo de la función que usa el modificador.
+    }
+
+    /**
+    * @dev Modificador que restringe la ejecución solo a usuarios con estado Approved
+    *      y rol Producer, Factory o Retailer. Usado para controlar permisos en funciones
+    *      de transferencia de tokens (emisión y envío).
+    */
+    modifier onlyTransfersAllowed() {
+        User storage user = users[addressToUserId[msg.sender]];
+        //require(user.status == UserStatus.Approved && (user.role == UserRole.Producer || user.role == UserRole.Factory || user.role == UserRole.Retailer), "No autorizado para transferir tokens");
+        if (!(user.status == UserStatus.Approved && (user.role == UserRole.Producer || user.role == UserRole.Factory || user.role == UserRole.Retailer))) revert NoTransfersAllowed();
+        _;
+    }
+
+    /**
+    * @dev Modificador que restringe la ejecución solo a usuarios con estado Approved
+    *      y rol Factory, Retailer o Consumer. Usado para controlar permisos en funciones
+    *      que aceptan o rechazan tokens recibidos en transferencias.
+    */
+    modifier onlyReceiverAllowed() {
+        User storage user = users[addressToUserId[msg.sender]];
+        if (!(user.status == UserStatus.Approved && (user.role == UserRole.Factory || user.role == UserRole.Retailer || user.role == UserRole.Consumer))) revert NoReceiverAllowed();
+        //require(user.status == UserStatus.Approved && (user.role == UserRole.Factory || user.role == UserRole.Retailer || user.role == UserRole.Consumer), "No autorizado para recibir o rechazar tokens");
+        _;
+    }
+
+    /**
     * @dev Solo permite acceso al administrator/dueño actual del contrato.
-    * @dev Verifica que quien llama a la función (`msg.sender`) es el dueño o administrador del contrato.
-    *      Si no, revierte la transacción.
     */
     modifier onlyOwner() {
         //require(owner == msg.sender, "No es el administrador o dueno del contrato");
@@ -345,8 +382,109 @@ contract SupplyChain  is ReentrancyGuard {
         _; // Este símbolo especial indica que se debe ejecutar el cuerpo de la función que usa el modificador.
     }
 
-    /* ======================= FUNCIONES PRINCIPALES:  ======================= */
+    /**
+     * @dev Solo permite acceso a usuarios con rol de pausador o dueño/administrador.
+    */
+    // Modificador para restringir funciones solo a pausadores autorizados
+    modifier onlyPauser() {
+        //require(pauseRoles[msg.sender] == PauseRole.Pauser || msg.sender == owner, "No autorizado para pausar");
+        if (pauseRoles[msg.sender] != PauseRole.Pauser && msg.sender != owner) revert Unauthorized();
+        _;
+    }
 
+    /**
+    * @dev Restringe ejecución si el contrato está pausado.
+    */
+    // Modificador para funciones que solo pueden ejecutarse si el contrato NO está pausado
+    modifier whenNotPaused() {
+        //require(!paused, "Contrato pausado");
+        if (paused) revert ContractPaused();
+        _;
+    }
+
+    /**
+    * @dev Restringe ejecución si el contrato no está pausado (opcional).
+    */
+    // Modificador para funciones que solo pueden ejecutarse si el contrato está pausado (opcional)
+    modifier whenPaused() {
+        //require(paused, "Contrato no esta pausado");
+        if (!paused) revert ContractNotPaused();
+        _;
+    }
+
+/* ======================= FUNCIONES PRINCIPALES: ejemplos ======================= */
+
+    /**
+    * @notice Asigna o revoca el rol Pauser a una dirección, controlando autorización para pausar/reanudar.
+    * @param account Dirección a la que se asignará el rol.
+    * @param role El rol a asignar (None o Pauser).
+    */
+    function setPauseRole(address account, PauseRole role) external onlyOwner {
+        pauseRoles[account] = role;
+        emit PauseRoleChanged(account, role);
+    }
+
+    /**
+    * @notice Pausa todas las funciones críticas del contrato.
+    * @dev Solo el owner o usuarios con rol Pauser pueden pausar si el contrato no está ya pausado.
+    */
+    // Función para pausar el contrato (solo el owner)
+    function pause() external onlyPauser whenNotPaused {
+        paused = true;
+        emit Paused(msg.sender);
+    }
+
+    /**
+    * @notice Reanuda la operación normal del contrato si está pausado.
+    * @dev Solo el owner o usuarios con rol Pauser pueden reanudar si el contrato estaba pausado.
+    */
+    // Función para reanudar el contrato (solo el owner)
+    function unpause() external onlyPauser whenPaused {
+        paused = false;
+        emit Unpaused(msg.sender);
+    }
+
+    /**
+    * @notice Consulta el estado actual de pausabilidad del contrato.
+    * @return bool True si el contrato está pausado, false en caso contrario.
+    */
+    function isPaused() public view returns (bool) {
+        return paused;
+    }
+
+    /**
+    * @notice Inicializa la transferencia de ownership a otra dirección.
+    * @param newOwner Dirección del nuevo propietario candidato.
+    * @dev Solo puede ser llamada por el owner y requiere contrato activo (no pausado).
+    */
+    function initiateOwnershipTransfer(address newOwner) external onlyOwner whenNotPaused {
+        //require(newOwner != address(0), "Nueva direccion invalida");
+        if (newOwner == address(0)) revert InvalidAddress();
+        pendingOwner = newOwner;
+        emit OwnershipTransferInitiated(owner, newOwner);
+    }
+
+    /**
+    * @notice El candidato a owner debe aceptar para completar la transferencia de ownership.
+    * @dev Solo llamable por el address pendingOwner previamente configurado.
+    */
+    function acceptOwnership() external whenNotPaused {
+        //require(msg.sender == pendingOwner, "Solo nuevo owner puede aceptar");
+        if (msg.sender != pendingOwner) revert Unauthorized();
+        address oldOwner = owner;
+        owner = pendingOwner;
+        pendingOwner = address(0);
+        emit OwnershipTransferred(oldOwner, owner);
+    }
+
+    /**
+     * @notice Getter público para ver quién es el pendingOwner actual.
+     * @return Dirección del usuario que debe aceptar la transferencia de ownership.
+     */
+    function getPendingOwner() public view returns (address) {
+        return pendingOwner;
+    }
+    
     // Gestión de Usuarios
     function requestUserRole(string memory role) public { 
     }
